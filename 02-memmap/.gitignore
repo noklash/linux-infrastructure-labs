@@ -1,0 +1,75 @@
+# ==============================
+# Build & binaries
+# ==============================
+
+build/
+
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+
+memmap
+memory_test
+memory_test_touched
+memory_test_untouched
+
+*.out
+*.exe
+
+
+# ==============================
+# Editor / IDE
+# ==============================
+
+.vscode/
+.idea/
+
+*.swp
+*.swo
+*~
+
+.DS_Store
+
+
+# ==============================
+# Ccache
+# ==============================
+
+.ccache/
+.cache/ccache/
+
+
+# ==============================
+# Package managers / build systems
+# ==============================
+
+.conan/
+vcpkg_installed/
+
+.meson/
+meson-private/
+meson-info/
+
+compile_commands.json
+
+
+# ==============================
+# Test / temporary files
+# ==============================
+
+*.save
+*.tmp
+*.log
+
+core
+core.*
+
+
+# ==============================
+# Backup files
+# ==============================
+
+*.orig
+*.bak
