@@ -17,5 +17,13 @@ int main(int argc, char *argv[])
 
     printf("Size: %ld bytes\n", st.st_size);
 
+    if (S_ISREG(st.st_mode)) {
+        printf("Type: regular file\n");
+    } else if (S_ISDIR(st.st_mode)) {
+        printf("Type: directory\n");
+    } else {
+        printf("Type: other\n");
+    }
+
     return 0;
 }
