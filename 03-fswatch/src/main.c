@@ -1,6 +1,29 @@
+#define _DEFAULT_SOURCE
+
+#include <inttypes.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <inttypes.h>
+
+static void print_type(mode_t mode)
+{
+    if (S_ISREG(mode)) {
+        printf("Type: regular file\n");
+    } else if (S_ISDIR(mode)) {
+        printf("Type: directory\n");
+    } else if (S_ISLNK(mode)) {
+        printf("Type: symbolic link\n");
+    } else if (S_ISCHR(mode)) {
+        printf("Type: character device\n");
+    } else if (S_ISBLK(mode)) {
+        printf("Type: block device\n");
+    } else if (S_ISFIFO(mode)) {
+        printf("Type: FIFO\n");
+    } else if (S_ISSOCK(mode)) {
+        printf("Type: socket\n");
+    } else {
+        printf("Type: unknown\n");
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -17,24 +40,7 @@ int main(int argc, char *argv[])
     }
 
     printf("Size: %" PRIdMAX " bytes\n", (intmax_t)st.st_size);
-
-    if (S_ISREG(st.st_mode)) {
-        printf("Type: regular file\n");
-    } else if (S_ISDIR(st.st_mode)) {
-        printf("Type: directory\n");
-    } else if (S_ISLNK(st.st_mode)) {
-        printf("Type: symbolic link\n");
-    } else if (S_ISCHR(st.st_mode)) {
-        printf("Type: character device\n");
-    } else if (S_ISBLK(st.st_mode)) {
-        printf("Type: block device\n");
-    } else if (S_ISFIFO(st.st_mode)) {
-        printf("Type: FIFO\n");
-    } else if (S_ISSOCK(st.st_mode)) {
-        printf("Type: socket\n");
-    } else {
-        printf("Type: unknown\n");
-    }
+    print_type(st.st_mode);
 
     return 0;
 }
