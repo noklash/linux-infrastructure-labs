@@ -1,147 +1,97 @@
 
-
-````markdown
 # Filesystem Experiments
 
-This document records controlled experiments performed during the development of `fswatch`.
+This document records controlled experiments performed while developing `fswatch`.
 
-The purpose of these experiments is to understand Linux filesystem behavior from first principles and compare the behavior observed by `fswatch` with native Linux utilities and system interfaces.
+The purpose of the experiments is to observe actual Linux filesystem behavior before implementing or documenting assumptions.
 
-Experiments are separate from automated tests.
-
-- Tests verify that `fswatch` behaves as expected.
-- Experiments investigate how Linux behaves.
-- Observations are recorded from the actual system.
-- Conclusions are based on observed behavior and documented system interfaces.
-
----
-
-## Experiment 001: `stat()` Metadata
-
-### Objective
-
-Understand what information Linux exposes about a filesystem object through the `stat()` system interface.
-
-The experiment compares the metadata reported by:
+Each experiment follows this general process:
 
 ```text
-fswatch
+question
+   ↓
+controlled filesystem state
+   ↓
+Linux observation
+   ↓
+interpretation
+   ↓
+filesystem model
+   ↓
+implementation
 ````
 
-and:
+The experiments are separate from automated tests.
 
-```text
-stat
-```
+Tests verify that `fswatch` behaves as intended.
 
-The experiment uses both a regular file and a directory.
+Experiments investigate how Linux itself behaves.
 
 ---
 
-### System Under Test
+# Experiment 001: `stat()` Metadata
 
-Project:
+## Objective
 
-```text
-03-fswatch
-```
+Determine what filesystem metadata Linux exposes through `stat()` and compare it with the information currently reported by `fswatch`.
 
-Program:
+The experiment specifically investigates:
 
-```text
-./fswatch
-```
-
-Linux utility:
-
-```text
-stat
-```
-
-Primary C interface:
-
-```c
-stat()
-```
-
-Primary data structure:
-
-```c
-struct stat
-```
+* logical file size
+* file type
+* inode identity
+* filesystem/device identity
+* link count
+* ownership
+* permissions
+* timestamps
+* allocated storage information
+* directory metadata
 
 ---
 
-## Experiment Setup
+## Setup
 
-The experiment script is:
+The experiment was performed inside the `03-fswatch` project.
+
+The initial `fswatch` command was:
+
+```bash
+./fswatch info <path>
+```
+
+The corresponding Linux command was:
+
+```bash
+stat <path>
+```
+
+The project also contains:
 
 ```text
 experiments/001-stat-metadata.sh
 ```
 
-Make the script executable:
-
-```bash
-chmod +x experiments/001-stat-metadata.sh
-```
-
-Run it against a regular file:
-
-```bash
-./experiments/001-stat-metadata.sh README.md
-```
-
-Run it against the current directory:
-
-```bash
-./experiments/001-stat-metadata.sh .
-```
+which runs both inspections against the same target.
 
 ---
 
-## Expected Questions
+## Regular File
 
-The experiment is intended to answer the following questions:
-
-1. Does `fswatch` report the same logical file size as Linux `stat`?
-2. How does Linux represent a directory?
-3. Is a directory's `st_size` the total size of everything inside it?
-4. What is the relationship between `st_dev` and `st_ino`?
-5. What other metadata exists inside `struct stat`?
-6. Does a pathname directly represent the filesystem object?
-7. What information is currently missing from `fswatch`?
-
----
-
-# Regular File
-
-## Target
+The experiment was first run against:
 
 ```text
 README.md
 ```
 
-## Observed Metadata
+`fswatch` reported:
 
 ```text
-st_size    = 23338 bytes
-st_blocks  = 48
-st_blksize = 4096
-st_dev     = 8,2
-st_ino     = 401824
-st_nlink   = 1
-st_mode    = 0664
+Size: 23338 bytes
+Type: regular file
 ```
 
-The filesystem utility reports the same logical size as `fswatch`.
-
-```text
-fswatch -> 23338 bytes
-stat    -> 23338 bytes
-```
-
-The complete `stat` output observed during the experiment was:
+Linux `stat` reported:
 
 ```text
 File: README.md
@@ -149,46 +99,48 @@ size: 23338
 Blocks: 48
 IO Block: 4096
 regular file
+
 Device: 8,2
 Inode: 401824
 Links: 1
+
 Access: (0664/-rw-rw-r--)
 Uid: (1000/gmma)
 Gid: (1000/gmma)
 ```
 
-Observed timestamps included:
+The logical size reported by `fswatch` matched `stat`.
 
-```text
-Access: 2026-09-16 07:28:56.479725662 +0100
-Modify: 2026-09-16 07:28:56.436145447 +0100
-Change: 2026-09-16 07:28:56.436145447 +0100
-Birth: 2026-09-15 08:37:45.809904023 +0100
+This confirms that the current implementation is reading:
+
+```c
+st_size
+```
+
+from:
+
+```c
+struct stat
 ```
 
 ---
 
-# Directory
+## Directory
 
-## Target
+The experiment was then run against:
 
 ```text
 .
 ```
 
-## Observed Metadata
+`fswatch` reported:
 
 ```text
-st_size    = 4096 bytes
-st_blocks  = 8
-st_blksize = 4096
-st_dev     = 8,2
-st_ino     = 401809
-st_nlink   = 7
-st_mode    = 0775
+Size: 4096 bytes
+Type: directory
 ```
 
-The complete `stat` output observed during the experiment was:
+Linux `stat` reported:
 
 ```text
 File: .
@@ -196,422 +148,512 @@ size: 4096
 Blocks: 8
 IO Block: 4096
 directory
+
 Device: 8,2
 Inode: 401809
 Links: 7
-Access: (0775/drwxrwxr-x)
-Uid: (1000/gmma)
-Gid: (1000/gmma)
 ```
 
-Observed timestamps included:
+The important observation is that a directory also has a filesystem object size.
+
+However:
 
 ```text
-Access: 2026-09-17 07:48:26.933950504 +0100
-Modify: 2026-09-16 07:00:34.921309440 +0100
-Change: 2026-09-16 07:00:34.921309440 +0100
-Birth: 2026-09-15 08:37:10.549737167 +0100
+directory st_size
 ```
+
+does not represent the total size of everything stored beneath that directory.
+
+It represents the size associated with the directory filesystem object.
+
+Recursive storage accounting is a separate problem.
 
 ---
 
-# Observation 1: `st_size`
+## `struct stat`
 
-For the regular file:
+The experiment showed that the current `fswatch` implementation uses only a small portion of the metadata available through `struct stat`.
 
-```text
-st_size = 23338 bytes
-```
-
-For the directory:
-
-```text
-st_size = 4096 bytes
-```
-
-The important distinction is that the directory's `st_size` does **not** represent the combined size of all files and directories beneath it.
-
-It represents the size of the directory filesystem object itself.
-
-Therefore:
-
-```text
-directory st_size != recursive directory contents size
-```
-
-This demonstrates that `st_size` must be interpreted according to the type and semantics of the filesystem object being inspected.
-
----
-
-# Observation 2: Logical Size vs Allocated Storage
-
-The regular file reported:
-
-```text
-st_size   = 23338 bytes
-st_blocks = 48
-```
-
-These values represent different concepts.
-
-`st_size` describes the logical size of the file.
-
-`st_blocks` describes filesystem storage allocation in units defined by the interface.
-
-Therefore:
-
-```text
-logical file size != allocated storage
-```
-
-This distinction will become more important when investigating:
-
-* sparse files
-* block allocation
-* filesystem overhead
-* `du`
-* disk usage
-* storage accounting
-
-The current version of `fswatch` reports only `st_size`.
-
----
-
-# Observation 3: Filesystem Identity
-
-Both the regular file and directory reported:
-
-```text
-st_dev = 8,2
-```
-
-This indicates that both objects currently belong to the same device/filesystem identity as represented by `struct stat`.
-
-The objects still have different inode numbers:
-
-```text
-README.md -> st_ino = 401824
-.         -> st_ino = 401809
-```
-
-Therefore, within this observation:
-
-```text
-same st_dev
-different st_ino
-```
-
-The combination of device identity and inode identity will become important when investigating whether two different pathnames refer to the same underlying filesystem object.
-
----
-
-# Observation 4: Inode Identity
-
-The regular file reported:
-
-```text
-st_ino = 401824
-```
-
-The directory reported:
-
-```text
-st_ino = 401809
-```
-
-The inode number is metadata associated with the filesystem object.
-
-This provides an important distinction:
-
-```text
-pathname != inode
-```
-
-A pathname is a name used during filesystem path resolution.
-
-The inode represents the underlying filesystem object within the filesystem's namespace and metadata model.
-
-This distinction will be investigated further with hard links.
-
----
-
-# Observation 5: Link Count
-
-The regular file reported:
-
-```text
-st_nlink = 1
-```
-
-The directory reported:
-
-```text
-st_nlink = 7
-```
-
-The link count represents the number of hard links associated with the filesystem object.
-
-The regular file currently has one directory entry referring to it.
-
-The directory has a higher link count because directory link semantics include relationships involving directory entries and parent/child directory structure.
-
-The exact semantics of directory link counts will be investigated separately rather than assumed from this single observation.
-
----
-
-# Observation 6: File Type
-
-`fswatch` currently classifies filesystem objects using the file type information stored in `st_mode`.
-
-For the regular file:
-
-```text
-Type: regular file
-```
-
-For the directory:
-
-```text
-Type: directory
-```
-
-The underlying C checks use macros such as:
-
-```c
-S_ISREG()
-S_ISDIR()
-S_ISLNK()
-S_ISCHR()
-S_ISBLK()
-S_ISFIFO()
-S_ISSOCK()
-```
-
-This demonstrates that file type is represented as metadata associated with the filesystem object.
-
----
-
-# Observation 7: Permissions
-
-The regular file reported:
-
-```text
-st_mode = 0664
-```
-
-The directory reported:
-
-```text
-st_mode = 0775
-```
-
-The human-readable permission representations were:
-
-```text
-README.md -> -rw-rw-r--
-.         -> drwxrwxr-x
-```
-
-This demonstrates that `st_mode` contains both file type information and permission information.
-
-The current `fswatch` implementation uses `st_mode` to determine file type but does not yet expose permission bits.
-
-Permissions will be investigated as a separate filesystem metadata milestone.
-
----
-
-# Observation 8: `struct stat` Contains More Information Than `fswatch` Currently Uses
-
-The current implementation uses:
-
-```text
-st_size
-st_mode
-```
-
-However, the same `struct stat` instance also provides information such as:
+Important fields include:
 
 ```text
 st_dev
 st_ino
+st_mode
 st_nlink
 st_uid
 st_gid
 st_size
 st_blksize
 st_blocks
-timestamps
+st_atime
+st_mtime
+st_ctime
 ```
 
-This means the current `fswatch` implementation is only exposing a small portion of the metadata available through `stat()`.
+The current implementation initially used:
 
-Future milestones will expose additional fields as each concept is studied and experimentally verified.
+```text
+st_size
+st_mode
+```
+
+This establishes the foundation for later filesystem inspection features.
 
 ---
 
-# Observation 9: Directory Objects
+## Filesystem Identity
 
-The directory itself has metadata:
+The experiment showed that both the regular file and the project directory were located on the same device:
 
 ```text
-Type: directory
-Size: 4096 bytes
-Inode: 401809
 Device: 8,2
 ```
 
-This reinforces an important filesystem concept:
+However, their inode numbers were different:
 
 ```text
-A directory is itself a filesystem object.
+README.md → inode 401824
+.         → inode 401809
 ```
 
-A directory is not simply an abstract container implemented outside the filesystem.
+This demonstrates that device identity and inode identity are separate pieces of information.
 
-The filesystem stores metadata for the directory object, including its inode identity, permissions, ownership, timestamps, and size.
-
-The directory also contains mappings between names and filesystem objects.
-
-This distinction becomes important when studying:
+A useful filesystem-level identity model is:
 
 ```text
-directory entry
-        |
-        v
-filesystem object
-        |
-        v
-inode + metadata
+(st_dev, st_ino)
 ```
+
+This becomes particularly important when examining hard links.
 
 ---
 
-# Observation 10: Pathname vs Filesystem Object
+## Logical Size Versus Allocated Storage
 
-The experiment started with pathnames:
-
-```text
-README.md
-.
-```
-
-Linux resolved those pathnames and returned metadata describing the corresponding filesystem objects.
-
-Therefore, the experiment supports the following model:
+The experiment also exposed:
 
 ```text
-pathname
-    |
-    v
-path resolution
-    |
-    v
-directory entries
-    |
-    v
-filesystem object
-    |
-    v
-inode + metadata
-```
-
-The pathname is therefore a way to locate an object.
-
-It is not the object itself.
-
----
-
-# Result
-
-The experiment confirms that `stat()` provides a metadata view of a filesystem object through `struct stat`.
-
-The experiment established the following observations:
-
-* `fswatch` reports the same logical `st_size` as Linux `stat`.
-* Regular files and directories are both filesystem objects with metadata.
-* A directory's `st_size` is not the recursive size of its contents.
-* `st_size` and `st_blocks` represent different storage-related concepts.
-* `st_dev` identifies the device/filesystem associated with the object.
-* `st_ino` provides inode identity.
-* `st_nlink` provides hard-link count information.
-* `st_mode` contains file type and permission information.
-* `struct stat` exposes substantially more metadata than the current `fswatch` output.
-* A pathname is used to locate a filesystem object but is not the object itself.
-
----
-
-# Engineering Conclusions
-
-The current implementation is intentionally small.
-
-At this stage:
-
-```text
-fswatch info <path>
-```
-
-answers:
-
-```text
-What is this filesystem object?
-What is its logical size?
-```
-
-It does not yet answer:
-
-```text
-Which inode is this?
-Which filesystem is it on?
-How many hard links refer to it?
-Who owns it?
-What permissions does it have?
-When was it accessed or modified?
-How much storage is allocated?
-Is it a symbolic link?
-```
-
-Those questions will be implemented only after the underlying filesystem concepts have been studied and experimentally verified.
-
-This keeps the project aligned with the first-principles learning goal rather than turning `fswatch` into a collection of unrelated `stat()` fields.
-
----
-
-# Next Experiment
-
-The next experiment will investigate inode identity and hard links.
-
-The experiment will create two different pathnames referring to the same filesystem object:
-
-```text
-original.txt
-hardlink.txt
-```
-
-The following metadata will then be compared:
-
-```text
-st_dev
-st_ino
-st_nlink
 st_size
+st_blocks
+st_blksize
 ```
 
-The primary question will be:
+These values represent different concepts.
+
+For the regular file:
 
 ```text
-Can two different pathnames refer to the same underlying filesystem object?
+size   = 23338 bytes
+blocks = 48
+IO     = 4096 bytes
 ```
 
-This experiment will establish the relationship between:
+Therefore:
 
 ```text
-pathname
-directory entry
-inode
-hard link
-filesystem identity
+logical file size
 ```
 
+and:
 
+```text
+physical storage allocation
 ```
+
+should not be treated as the same measurement.
+
+This distinction will be investigated more deeply with sparse files and storage experiments.
+
+---
+
+## Result
+
+Experiment 001 established that:
+
+* `stat()` exposes substantially more metadata than the current `fswatch` implementation reports.
+* `st_size` provides the logical size associated with the object.
+* `st_mode` provides file type and permission information.
+* directories are filesystem objects and have their own metadata.
+* directory `st_size` is not recursive content size.
+* `st_dev` identifies the filesystem/device.
+* `st_ino` identifies the inode within that filesystem.
+* `st_nlink` reports link count.
+* `st_blocks` relates to storage allocation.
+* `struct stat` provides the foundation for filesystem inspection.
+
+---
+
+# Experiment 002: Inode Identity and Hard Links
+
+## Objective
+
+Determine whether two different pathnames can refer to the same underlying filesystem object.
+
+The experiment investigates:
+
+* inode identity
+* filesystem/device identity
+* hard links
+* link counts
+* shared file data
+* the relationship between directory entries and filesystem objects
+* what happens when one hard link is removed
+
+---
+
+## Setup
+
+Create the experiment directory:
+
+```bash
+mkdir -p experiments/002-hard-links
+cd experiments/002-hard-links
 ```
+
+Create the original file:
+
+```bash
+printf 'filesystem identity experiment\n' > original.txt
+```
+
+Create a hard link:
+
+```bash
+ln original.txt hardlink.txt
+```
+
+---
+
+## Initial Inspection
+
+Inspect both names:
+
+```bash
+ls -li original.txt hardlink.txt
+```
+
+Observed:
+
+```text
+397192 -rw-rw-r-- 2 gmma gmma 31 Sep 17 08:54 hardlink.txt
+397192 -rw-rw-r-- 2 gmma gmma 31 Sep 17 08:54 original.txt
+```
+
+Both pathnames reported:
+
+```text
+inode = 397192
+links = 2
+size = 31 bytes
+```
+
+The relevant metadata was then inspected directly:
+
+```bash
+stat -c 'name=%n dev=%d inode=%i links=%h size=%s' original.txt hardlink.txt
+```
+
+Observed:
+
+```text
+name=original.txt dev=2050 inode=397192 links=2 size=31
+name=hardlink.txt dev=2050 inode=397192 links=2 size=31
+```
+
+---
+
+## Observation 1: Same Inode
+
+Both pathnames reported:
+
+```text
+inode = 397192
+```
+
+This means both names refer to the same inode.
+
+They are not two independent filesystem objects containing identical data.
+
+The relationship is:
+
+```text
+directory
+├── original.txt ──────┐
+│                      │
+└── hardlink.txt ──────┤
+                       ↓
+                  inode 397192
+```
+
+---
+
+## Observation 2: Same Device
+
+Both pathnames reported:
+
+```text
+dev = 2050
+```
+
+The combination:
+
+```text
+(st_dev, st_ino)
+```
+
+therefore identified the same filesystem object:
+
+```text
+(2050, 397192)
+```
+
+This demonstrates why filesystem identity cannot be based on the pathname alone.
+
+---
+
+## Observation 3: Link Count
+
+Both names reported:
+
+```text
+links = 2
+```
+
+The inode had two hard-link references:
+
+```text
+inode 397192
+    │
+    ├── original.txt
+    └── hardlink.txt
+```
+
+---
+
+## Observation 4: Shared Data
+
+Data was appended through:
+
+```bash
+printf 'changed through hardlink\n' >> hardlink.txt
+```
+
+The contents of both names were then inspected.
+
+`original.txt` produced:
+
+```text
+filesystem identity experiment
+changed through hardlink
+```
+
+`hardlink.txt` produced the same contents.
+
+This demonstrates that both pathnames reference the same underlying object.
+
+---
+
+## Observation 5: Shared Metadata
+
+The metadata was inspected again:
+
+```bash
+stat -c '%n inode=%i links=%h size=%s' original.txt hardlink.txt
+```
+
+Observed:
+
+```text
+original.txt inode=397192 links=2 size=56
+hardlink.txt inode=397192 links=2 size=56
+```
+
+The size increased from:
+
+```text
+31 bytes
+```
+
+to:
+
+```text
+56 bytes
+```
+
+Both pathnames reported the same size because the underlying filesystem object was the same.
+
+---
+
+## Observation 6: Removing One Hard Link
+
+The second pathname was removed:
+
+```bash
+rm hardlink.txt
+```
+
+The remaining pathname was inspected:
+
+```bash
+stat -c '%n inode=%i links=%h size=%s' original.txt
+```
+
+Observed:
+
+```text
+original.txt inode=397192 links=1 size=56
+```
+
+The inode remained:
+
+```text
+397192
+```
+
+The size remained:
+
+```text
+56 bytes
+```
+
+The link count changed:
+
+```text
+2 → 1
+```
+
+The filesystem object therefore remained accessible through `original.txt`.
+
+---
+
+## Filesystem Model
+
+Before removing the hard link:
+
+```text
+directory
+├── original.txt ──────┐
+│                      │
+└── hardlink.txt ──────┤
+                       ↓
+                  inode 397192
+                       │
+                    file data
+```
+
+After removing the hard link:
+
+```text
+directory
+│
+└── original.txt ──────→ inode 397192
+                              │
+                           file data
+```
+
+This demonstrates that:
+
+```text
+pathname != filesystem object
+```
+
+A pathname provides a way to locate an object.
+
+It does not necessarily uniquely identify the object.
+
+---
+
+## Hard Link Versus Copy
+
+A hard link is not a file copy.
+
+A copy produces separate filesystem objects:
+
+```text
+original.txt → inode A
+copy.txt     → inode B
+```
+
+A hard link produces another reference to the same object:
+
+```text
+original.txt ──┐
+               ├──→ inode A
+hardlink.txt ──┘
+```
+
+Writing through either hard-link pathname modifies the same filesystem object.
+
+---
+
+## Removing a Hard Link
+
+Removing a hard link removes a directory entry.
+
+Conceptually:
+
+```text
+remove pathname
+       ↓
+remove directory entry
+       ↓
+decrease link count
+       ↓
+references remain?
+   ├── yes → object remains
+   └── no  → object may be reclaimed
+```
+
+This distinction will become important later when the project investigates open file descriptors and deleted-but-open files.
+
+---
+
+## Result
+
+Experiment 002 confirms:
+
+```text
+different pathnames
+        ↓
+can reference
+        ↓
+the same filesystem object
+```
+
+The observed identity was:
+
+```text
+device = 2050
+inode  = 397192
+```
+
+The experiment established that:
+
+* hard links share an inode
+* hard links share file contents
+* hard links share object metadata
+* `st_nlink` represents the number of hard-link references
+* removing one pathname decreases the link count
+* the underlying object remains while references to it remain
+* pathname identity and filesystem object identity are different concepts
+
+---
+
+# Experiment 003: Planned
+
+The next filesystem experiment will investigate the relationship between:
+
+```text
+symbolic link
+stat()
+lstat()
+```
+
+The experiment will determine:
+
+* what object `stat()` reports when given a symbolic link
+* what object `lstat()` reports
+* how the inode of a symbolic link differs from its target
+* how symbolic links differ from hard links
+* how `fswatch` should represent symbolic-link metadata

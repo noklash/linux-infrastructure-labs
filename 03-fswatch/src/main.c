@@ -39,6 +39,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    printf("Device: %" PRIuMAX "\n", (uintmax_t)st.st_dev);
+    printf("Inode: %" PRIuMAX "\n", (uintmax_t)st.st_ino);
+    printf("Links: %" PRIuMAX "\n", (uintmax_t)st.st_nlink);
     printf("Size: %" PRIdMAX " bytes\n", (intmax_t)st.st_size);
     print_type(st.st_mode);
 

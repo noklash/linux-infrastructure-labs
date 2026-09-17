@@ -45,16 +45,43 @@ echo "Running fswatch tests..."
 echo
 
 output=$(./fswatch info README.md)
+
 assert_contains \
     "regular file detection" \
     "$output" \
     "Type: regular file"
 
+assert_contains \
+    "regular file link count" \
+    "$output" \
+    "Links: 1"
+
+assert_contains \
+    "regular file size" \
+    "$output" \
+    "Size: 23338 bytes"
+
 output=$(./fswatch info .)
+
 assert_contains \
     "directory detection" \
     "$output" \
     "Type: directory"
+
+assert_contains \
+    "directory inode information" \
+    "$output" \
+    "Inode:"
+
+assert_contains \
+    "directory device information" \
+    "$output" \
+    "Device:"
+
+assert_contains \
+    "directory link count" \
+    "$output" \
+    "Links:"
 
 assert_fails \
     "nonexistent path fails" \

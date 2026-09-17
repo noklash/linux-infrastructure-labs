@@ -9,18 +9,26 @@ All meaningful project changes are recorded here.
 - Initial project structure.
 - Initial filesystem inspection command.
 - Reproducible Makefile build.
-- Initial automated test framework.
-- Initial filesystem engineering documentation.
+- Automated filesystem inspection tests.
+- Filesystem engineering documentation.
+- Filesystem metadata inspection for device, inode, link count, size, and type.
+- Controlled filesystem experiments covering `stat()` metadata and hard links.
+- Engineering documentation covering filesystem identity, hard links, and filesystem object semantics.
+
+### Changed
+
+- Expanded `fswatch info` to report `st_dev`, `st_ino`, and `st_nlink`.
+- Expanded automated tests to validate filesystem identity metadata.
+- Expanded project documentation to record filesystem experiments, lessons learned, architecture, design decisions, limitations, and troubleshooting.
 
 ### Planned
 
-- Complete filesystem object classification.
-- Symbolic link inspection.
-- Inode and filesystem identity inspection.
-- Hard-link experiments.
+- Symbolic link inspection using `lstat()`.
 - Ownership and permission inspection.
 - Timestamp inspection.
 - Directory traversal.
 - Recursive filesystem inspection.
 - Mount and filesystem boundary analysis.
 - Storage allocation analysis.
+- File descriptor and low-level I/O experiments.
+- Pseudo-filesystem investigation.
