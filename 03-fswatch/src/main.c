@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static void print_type(mode_t mode)
 {
@@ -25,6 +26,25 @@ static void print_type(mode_t mode)
     }
 }
 
+static int print_symlink_target(const char *path)
+{
+    char buffer[4096];
+    ssize_t length;
+
+    length = readlink(path, buffer, sizeof(buffer) - 1);
+
+    if (length == -1) {
+        perror("readlink");
+        return 1;
+    }
+
+    buffer[length] = '\0';
+
+    printf("Target: %s\n", buffer);
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     struct stat st;
@@ -34,8 +54,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (stat(argv[2], &st) == -1) {
-        perror("stat");
+    if (lstat(argv[2], &st) == -1) {
+        perror("lstat");
         return 1;
     }
 
@@ -44,6 +64,12 @@ int main(int argc, char *argv[])
     printf("Links: %" PRIuMAX "\n", (uintmax_t)st.st_nlink);
     printf("Size: %" PRIdMAX " bytes\n", (intmax_t)st.st_size);
     print_type(st.st_mode);
+
+    if (S_ISLNK(st.st_mode)) {
+        if (print_symlink_target(argv[2]) != 0) {
+            return 1;
+        }
+    }
 
     return 0;
 }

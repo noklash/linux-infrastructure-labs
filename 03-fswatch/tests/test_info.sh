@@ -5,6 +5,14 @@ set -u
 PASS=0
 FAIL=0
 
+TEST_DIR=$(mktemp -d)
+
+cleanup() {
+    rm -rf "$TEST_DIR"
+}
+
+trap cleanup EXIT
+
 pass() {
     echo "PASS: $1"
     PASS=$((PASS + 1))
@@ -30,6 +38,17 @@ assert_contains() {
     fi
 }
 
+assert_succeeds() {
+    local description="$1"
+    shift
+
+    if "$@" >/dev/null 2>&1; then
+        pass "$description"
+    else
+        fail "$description"
+    fi
+}
+
 assert_fails() {
     local description="$1"
     shift
@@ -44,7 +63,20 @@ assert_fails() {
 echo "Running fswatch tests..."
 echo
 
-output=$(./fswatch info README.md)
+TEST_FILE="$TEST_DIR/test-file.txt"
+TEST_DIR_PATH="$TEST_DIR/test-directory"
+TARGET="$TEST_DIR/target.txt"
+SYMLINK="$TEST_DIR/link.txt"
+BROKEN_SYMLINK="$TEST_DIR/broken.txt"
+
+printf 'hello filesystem\n' > "$TEST_FILE"
+mkdir "$TEST_DIR_PATH"
+printf 'symlink target\n' > "$TARGET"
+
+ln -s "$TARGET" "$SYMLINK"
+ln -s "$TEST_DIR/missing.txt" "$BROKEN_SYMLINK"
+
+output=$(./fswatch info "$TEST_FILE")
 
 assert_contains \
     "regular file detection" \
@@ -59,9 +91,9 @@ assert_contains \
 assert_contains \
     "regular file size" \
     "$output" \
-    "Size: 23338 bytes"
+    "Size: 17 bytes"
 
-output=$(./fswatch info .)
+output=$(./fswatch info "$TEST_DIR_PATH")
 
 assert_contains \
     "directory detection" \
@@ -83,9 +115,64 @@ assert_contains \
     "$output" \
     "Links:"
 
+output=$(./fswatch info "$SYMLINK")
+
+assert_contains \
+    "symbolic link detection" \
+    "$output" \
+    "Type: symbolic link"
+
+assert_contains \
+    "symbolic link target" \
+    "$output" \
+    "Target: $TARGET"
+
+assert_contains \
+    "symbolic link size" \
+    "$output" \
+    "Size: ${#TARGET} bytes"
+
+assert_succeeds \
+    "existing symbolic link succeeds" \
+    ./fswatch info "$SYMLINK"
+
+rm "$TARGET"
+
+output=$(./fswatch info "$SYMLINK")
+
+assert_contains \
+    "broken symbolic link detection" \
+    "$output" \
+    "Type: symbolic link"
+
+assert_contains \
+    "broken symbolic link target" \
+    "$output" \
+    "Target: $TARGET"
+
+assert_succeeds \
+    "broken symbolic link succeeds" \
+    ./fswatch info "$SYMLINK"
+
+output=$(./fswatch info "$BROKEN_SYMLINK")
+
+assert_contains \
+    "independent broken symbolic link detection" \
+    "$output" \
+    "Type: symbolic link"
+
+assert_contains \
+    "independent broken symbolic link target" \
+    "$output" \
+    "Target: $TEST_DIR/missing.txt"
+
+assert_succeeds \
+    "independent broken symbolic link succeeds" \
+    ./fswatch info "$BROKEN_SYMLINK"
+
 assert_fails \
     "nonexistent path fails" \
-    ./fswatch info does-not-exist
+    ./fswatch info "$TEST_DIR/does-not-exist"
 
 echo
 echo "Passed: $PASS"
