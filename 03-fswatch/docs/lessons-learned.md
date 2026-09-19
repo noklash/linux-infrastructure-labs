@@ -303,7 +303,7 @@ This distinction will become important when investigating:
 
 ## 10. `struct stat` Exposes More Than One Property
 
-The initial `fswatch` implementation only used:
+The initial `fswatch` implementation used:
 
 ```c
 st_size
@@ -357,39 +357,293 @@ The current `fswatch` implementation uses these macros to classify objects.
 
 ## 12. `stat()` Follows Symbolic Links
 
-A symbolic link introduces another layer into filesystem path resolution.
+Experiment 003 demonstrated that symbolic links introduce another layer into filesystem path resolution.
 
-The simplified model is:
+The setup was:
 
 ```text
-symbolic link
-      ↓
-target pathname
-      ↓
-target object
+target.txt
+link.txt -> target.txt
 ```
 
-`stat()` follows the symbolic link and normally reports metadata for the target.
+When:
 
-`lstat()` can inspect the symbolic link itself.
+```c
+stat("link.txt", &st);
+```
+
+was called, `stat()` followed the symbolic link and reported metadata for the target.
+
+The target was reported as:
+
+```text
+type: regular file
+inode: 396988
+size: 25 bytes
+```
+
+The symbolic link itself had a different inode:
+
+```text
+inode: 397056
+type: symbolic link
+size: 10 bytes
+```
+
+The important model is:
+
+```text
+link.txt
+    ↓
+follow symbolic link
+    ↓
+target.txt
+    ↓
+target object
+```
 
 Therefore:
 
 ```text
 stat()
     → target metadata
-
-lstat()
-    → link metadata
 ```
-
-This behavior has not yet been explored experimentally in this project.
-
-A dedicated symbolic-link experiment is planned.
 
 ---
 
-## 13. Filesystem Identity Is Different From Path Identity
+## 13. `lstat()` Inspects the Symbolic Link Itself
+
+Experiment 003 showed that `lstat()` behaves differently from `stat()`.
+
+For:
+
+```text
+link.txt -> target.txt
+```
+
+calling:
+
+```c
+lstat("link.txt", &st);
+```
+
+returned metadata for the symbolic link itself.
+
+The experiment reported:
+
+```text
+inode: 397056
+type: symbolic link
+size: 10 bytes
+```
+
+The model is:
+
+```text
+lstat()
+    ↓
+inspect pathname's object
+    ↓
+symbolic-link object
+```
+
+Therefore:
+
+```text
+stat()
+    → target object
+
+lstat()
+    → symbolic-link object
+```
+
+This distinction is important when a program needs to inspect the object represented by the supplied pathname rather than automatically following symbolic links.
+
+---
+
+## 14. Symbolic Links Have Their Own Filesystem Identity
+
+The symbolic-link experiment showed that the link itself has its own:
+
+```text
+device
+inode
+link count
+size
+type
+```
+
+For example:
+
+```text
+link.txt
+    inode = 397056
+    type  = symbolic link
+    size  = 10 bytes
+```
+
+The target had a different identity:
+
+```text
+target.txt
+    inode = 396988
+    type  = regular file
+    size  = 25 bytes
+```
+
+Therefore:
+
+```text
+symbolic link identity
+    ≠
+target identity
+```
+
+A symbolic link is a filesystem object that contains a reference to another pathname.
+
+---
+
+## 15. `readlink()` Reads the Stored Symbolic-Link Target
+
+A symbolic link stores a target pathname.
+
+`readlink()` retrieves that stored pathname without following it.
+
+For:
+
+```text
+link.txt -> target.txt
+```
+
+the experiment returned:
+
+```text
+target.txt
+```
+
+with:
+
+```text
+length = 10 bytes
+```
+
+The model is:
+
+```text
+symbolic-link object
+        |
+        +── stores "target.txt"
+```
+
+`readlink()` exposes the stored target.
+
+It does not return metadata for the target.
+
+---
+
+## 16. A Broken Symbolic Link Still Exists
+
+The experiment then removed:
+
+```text
+target.txt
+```
+
+The symbolic link remained:
+
+```text
+link.txt -> target.txt
+```
+
+`lstat()` still succeeded:
+
+```text
+type: symbolic link
+inode: 397056
+size: 10 bytes
+```
+
+`readlink()` still returned:
+
+```text
+target.txt
+```
+
+But:
+
+```c
+stat("link.txt", &st);
+```
+
+failed with:
+
+```text
+No such file or directory
+```
+
+because the target could no longer be resolved.
+
+This demonstrates an important distinction:
+
+```text
+broken symbolic link
+    ≠
+nonexistent pathname
+```
+
+The link object still exists.
+
+Only the object it points to is missing.
+
+---
+
+## 17. `stat()`, `lstat()`, and `readlink()` Answer Different Questions
+
+The symbolic-link experiment made the purpose of the three interfaces clearer.
+
+```text
+stat()
+    → What object do I reach by following this pathname?
+
+lstat()
+    → What object is represented by this pathname itself?
+
+readlink()
+    → What target pathname is stored in this symbolic link?
+```
+
+For:
+
+```text
+link.txt -> target.txt
+```
+
+the relationship can be visualized as:
+
+```text
+                    link.txt
+                       |
+                       v
+                symbolic-link
+                  object
+                       |
+                       | stores
+                       v
+                  target.txt
+                       |
+                       v
+                 target object
+```
+
+`lstat()` stops at the symbolic-link object.
+
+`stat()` follows the link.
+
+`readlink()` reads the stored target pathname.
+
+---
+
+## 18. Filesystem Identity Is Different From Path Identity
 
 A pathname can change while the underlying object remains the same.
 
@@ -401,25 +655,21 @@ original.txt ──┐
 hardlink.txt ──┘
 ```
 
-After:
-
-```bash
-rm hardlink.txt
-```
-
-the object remains accessible through:
+Symbolic links show another side of the same idea:
 
 ```text
-original.txt
+link.txt
+    ↓
+target.txt
 ```
 
-The filesystem object therefore has an identity independent of the specific pathname used to reach it.
+The pathname `link.txt` identifies a symbolic-link object, while the pathname stored inside that object refers to another object.
 
-This is an important mental model for filesystem tools.
+The filesystem therefore contains relationships between objects and names rather than simply a flat collection of filenames.
 
 ---
 
-## 14. The Kernel Interface Should Drive the Tool
+## 19. The Kernel Interface Should Drive the Tool
 
 `fswatch` should be built around the actual Linux interfaces that expose filesystem behavior.
 
@@ -435,10 +685,16 @@ and:
 struct stat
 ```
 
-Future filesystem functionality will use interfaces such as:
+The experiments have now also established the behavior of:
 
 ```c
 lstat()
+readlink()
+```
+
+Future filesystem functionality will use interfaces such as:
+
+```c
 opendir()
 readdir()
 closedir()
@@ -452,7 +708,7 @@ The project should first understand what these interfaces actually provide befor
 
 ---
 
-## 15. Experiments and Tests Have Different Jobs
+## 20. Experiments and Tests Have Different Jobs
 
 Experiments answer questions about Linux behavior.
 
@@ -460,6 +716,12 @@ For example:
 
 ```text
 Can two pathnames refer to the same inode?
+```
+
+or:
+
+```text
+Does stat() follow a symbolic link?
 ```
 
 Tests answer questions about `fswatch` behavior.
@@ -484,7 +746,7 @@ Keeping these concerns separate makes the project easier to reason about.
 
 ---
 
-## 16. Implementation Should Follow Observation
+## 21. Implementation Should Follow Observation
 
 The project follows this sequence:
 
@@ -504,9 +766,25 @@ compare implementation with system behavior
 
 This prevents the tool from becoming a collection of assumptions.
 
+The symbolic-link work followed this process directly:
+
+```text
+experiment
+    ↓
+stat() / lstat() / readlink()
+    ↓
+understand the difference
+    ↓
+decide fswatch behavior
+    ↓
+implement
+    ↓
+test
+```
+
 ---
 
-## 17. Current Filesystem Mental Model
+## 22. Current Filesystem Mental Model
 
 The current model is:
 
@@ -537,57 +815,77 @@ The current model is:
        timestamps
 ```
 
+For hard links:
+
+```text
+pathname A ──┐
+             ├──→ same filesystem object
+pathname B ──┘
+```
+
+For symbolic links:
+
+```text
+pathname
+    ↓
+symbolic-link object
+    ↓
+stored target pathname
+    ↓
+target object
+```
+
 Multiple directory entries can reference the same filesystem object.
 
-That is the key concept established by the hard-link experiment.
+A symbolic link is itself an object that stores a pathname pointing somewhere else.
 
 ---
 
-## 18. Current Engineering Direction
+## 23. Current `fswatch` Direction
 
-The current `fswatch` implementation reports:
+The current `fswatch info <path>` implementation uses `stat()`.
 
-```text
-Size
-Type
-```
-
-The next implementation stage will add:
+That means a symbolic link currently behaves differently from a regular filesystem object:
 
 ```text
-Device
-Inode
-Links
+fswatch info link.txt
+        ↓
+      stat()
+        ↓
+  target metadata
 ```
 
-using:
+The symbolic-link experiment showed that this is not the only possible behavior.
 
-```c
-st_dev
-st_ino
-st_nlink
+The next implementation decision is to make `fswatch info` inspect the supplied pathname itself.
+
+That means:
+
+```text
+fswatch info link.txt
+        ↓
+      lstat()
+        ↓
+symbolic-link metadata
+        ↓
+readlink()
+        ↓
+target pathname
 ```
 
-The implementation will then be tested against controlled filesystem states.
+The intended behavior is:
 
-Future experiments will investigate:
+* use `lstat()` for primary metadata
+* report `Type: symbolic link`
+* use `readlink()` to show the stored target
+* allow broken symbolic links to be inspected
+* do not yet report the target object's metadata
 
-* symbolic links
-* `stat()` versus `lstat()`
-* ownership and permissions
-* timestamps
-* directory traversal
-* recursive traversal
-* filesystem boundaries
-* mount points
-* storage allocation
-* sparse files
-* file descriptors
-* deleted-but-open files
+This keeps the implementation small while making the distinction between a symbolic link and its target visible.
 
 ---
 
-## 19. Core Lesson
+## 24. Core Lesson
 
 The most important lesson so far is that the Linux filesystem is not simply:
 
@@ -609,4 +907,40 @@ inode + metadata + data
 
 Multiple pathnames can reference the same object.
 
-Understanding this relationship is necessary before building reliable filesystem inspection tools.
+A symbolic link is itself a filesystem object that contains a target pathname.
+
+`stat()` follows that relationship.
+
+`lstat()` inspects the link itself.
+
+`readlink()` reads the stored target.
+
+Understanding these relationships is necessary before building reliable filesystem inspection tools.
+
+---
+
+## 25. Next Topics
+
+The filesystem topics still to investigate include:
+
+* ownership
+* permissions
+* timestamps
+* directory traversal
+* directory streams
+* file descriptors
+* `open()`
+* `read()`
+* `write()`
+* `close()`
+* deleted-but-open files
+* filesystem boundaries
+* mount points
+* pseudo-filesystems
+* allocated storage
+* sparse files
+* filesystem capacity
+
+Each topic should be investigated through a controlled experiment before being added to `fswatch`.
+
+
